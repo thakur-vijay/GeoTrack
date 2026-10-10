@@ -11,6 +11,7 @@ import SharedLogic
 struct MainView: View {
     @Bindable var router: MainRouter
     let networkClient: any NetworkClient
+    let socketManager: SocketManager
     var body: some View {
         TabView(selection: $router.activeTab) {
             Tab.init(
@@ -24,7 +25,8 @@ struct MainView: View {
                     ),
                     safeRegionViewModel: SafeRegionViewModel(
                         networkClient: networkClient
-                    )
+                    ),
+                    socketManager: socketManager
                 )
             }
             
@@ -37,8 +39,33 @@ struct MainView: View {
                     viewModel: UsersViewModel(
                         networkClient: networkClient,
                     ),
-                    authViewModel: .init(networkClient: networkClient)
+                    authViewModel: .init(networkClient: networkClient),
+                    socketManager: socketManager
                 )
+            }
+        }
+        .task {
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+        }
+        .task {
+            do {
+                guard let accessToken = GTKeychainStore.shared.accessToken,
+                      !accessToken.isEmpty else {
+                    return
+                }
+
+                // Connect the shared Kotlin SocketManager here.
+                try await socketManager.connect(
+                    accessToken: accessToken,
+                )
+                print("Socket connection", socketManager.isConnected)
+            }catch {
+                print(error.localizedDescription)
+            }
+        }
+        .onDisappear {
+            Task {
+                try? await socketManager.disconnect()
             }
         }
     }

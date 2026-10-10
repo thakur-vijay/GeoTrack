@@ -11,6 +11,7 @@ import SharedLogic
 struct SettingsView: View {
     let viewModel: UsersViewModel
     let authViewModel: AuthViewModel
+    let socketManager: SocketManager
     @State private var fullName = ""
     @State private var email = ""
     @State private var errorMessage: String?
@@ -33,11 +34,11 @@ struct SettingsView: View {
                             let accessToken = GTKeychainStore.shared.accessToken ?? ""
                             defer {
                                 GTKeychainStore.shared.clearTokens()
-                                GTKeychainStore.shared.clearClientID()
                                 appRouter.logout()
                             }
                             if !accessToken.isEmpty {
                                 do {
+                                    try await socketManager.disconnect()
                                     try await authViewModel.logout(accessToken: accessToken)
                                 } catch {
                                     print("Backend logout failed: \(error.localizedDescription)")

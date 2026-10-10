@@ -14,7 +14,6 @@ public final class GTKeychainStore{
         static let userId = "com.geotrack.userId"
         static let accessToken = "com.geotrack.accessToken"
         static let refreshToken = "com.geotrack.refreshToken"
-        static let clientID = "com.geotrack.clientId"
     }
     
     private init() {}
@@ -127,17 +126,5 @@ public final class GTKeychainStore{
         SecItemDelete(
             query as CFDictionary
         )
-    }
-    
-    func saveClientID(_ id: String) {
-        save(id, key: Key.clientID)
-    }
-    
-    var clientID: String? {
-        read(key: Key.clientID)
-    }
-    
-    func clearClientID() {
-        delete(key: Key.clientID)
     }
 }

@@ -21,63 +21,118 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
     private(set) var isLoadingLocation = false
     private(set) var errorMessage: String?
 
+    private var isUpdatingLocation = false
+
     override init() {
         authorizationStatus = manager.authorizationStatus
         super.init()
 
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.distanceFilter = 5
+        manager.activityType = .otherNavigation
+        manager.pausesLocationUpdatesAutomatically = false
+
+        // Supports location updates while the app is in the background.
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = true
     }
 
+    // MARK: - Permissions
+
     func requestPermission() {
-        switch manager.authorizationStatus {
+        authorizationStatus = manager.authorizationStatus
+
+        switch authorizationStatus {
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
 
-        case .authorizedAlways, .authorizedWhenInUse:
-            requestCurrentLocation()
+        case .authorizedWhenInUse:
+            // Request Always permission for background tracking.
+            manager.requestAlwaysAuthorization()
+
+        case .authorizedAlways:
+            startLocationUpdates()
 
         case .denied, .restricted:
-            errorMessage = "Location permission is disabled. Enable it in Settings."
+            errorMessage = "Location access is disabled. Enable it in Settings."
 
         @unknown default:
             errorMessage = "Unable to determine location permission."
         }
     }
 
+    // MARK: - Location Updates
+
     func requestCurrentLocation() {
-        guard authorizationStatus == .authorizedWhenInUse ||
-              authorizationStatus == .authorizedAlways else {
+        authorizationStatus = manager.authorizationStatus
+
+        guard authorizationStatus == .authorizedAlways ||
+              authorizationStatus == .authorizedWhenInUse else {
             requestPermission()
             return
         }
 
         isLoadingLocation = true
         errorMessage = nil
+
+        // One-time location request.
         manager.requestLocation()
     }
+
+    func startLocationUpdates() {
+        authorizationStatus = manager.authorizationStatus
+
+        guard authorizationStatus == .authorizedAlways ||
+              authorizationStatus == .authorizedWhenInUse else {
+            requestPermission()
+            return
+        }
+
+        guard !isUpdatingLocation else { return }
+
+        isUpdatingLocation = true
+        isLoadingLocation = true
+        errorMessage = nil
+
+        manager.startUpdatingLocation()
+    }
+
+    func stopLocationUpdates() {
+        manager.stopUpdatingLocation()
+        isUpdatingLocation = false
+        isLoadingLocation = false
+    }
+
+    // MARK: - Authorization Changes
 
     func locationManagerDidChangeAuthorization(
         _ manager: CLLocationManager
     ) {
         authorizationStatus = manager.authorizationStatus
 
-        switch manager.authorizationStatus {
-        case .authorizedAlways, .authorizedWhenInUse:
-            requestCurrentLocation()
+        switch authorizationStatus {
+        case .authorizedAlways:
+            startLocationUpdates()
+
+        case .authorizedWhenInUse:
+            // Foreground access only; background tracking may not work.
+            startLocationUpdates()
 
         case .denied, .restricted:
-            isLoadingLocation = false
-            errorMessage = "Location access is denied."
+            stopLocationUpdates()
+            errorMessage = "Location access is denied. Enable it in Settings."
 
         case .notDetermined:
             break
 
         @unknown default:
-            isLoadingLocation = false
+            stopLocationUpdates()
             errorMessage = "Unknown location authorization status."
         }
     }
+
+    // MARK: - CLLocationManagerDelegate
 
     func locationManager(
         _ manager: CLLocationManager,
@@ -89,9 +144,16 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
             return
         }
 
+        guard location.horizontalAccuracy >= 0 else { return }
+
         currentLocation = location
         isLoadingLocation = false
         errorMessage = nil
+
+        print(
+            "📍 Location updated: \(location.coordinate.latitude), " +
+            "\(location.coordinate.longitude)"
+        )
     }
 
     func locationManager(
@@ -100,5 +162,7 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
     ) {
         isLoadingLocation = false
         errorMessage = error.localizedDescription
+
+        print("❌ Location error: \(error.localizedDescription)")
     }
 }

@@ -126,7 +126,6 @@ struct SignupView: View {
                     refreshToken: response.data.refreshToken
                 )
                 GTKeychainStore.shared.save(userId: response.data.user.id)
-                GTKeychainStore.shared.saveClientID(response.data.user.id)
                 router.push(.createGroup)
             }catch {
                 print(error.localizedDescription)

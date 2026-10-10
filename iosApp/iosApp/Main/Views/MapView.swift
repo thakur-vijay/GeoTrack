@@ -13,11 +13,12 @@ import SharedLogic
 struct MapView: View {
     let viewModel: GroupViewModel
     let safeRegionViewModel: SafeRegionViewModel
+    let socketManager: SocketManager
 
     @Environment(AppRouter.self) private var appRouter
 
     @State private var locationManager = LocationManager()
-    
+
     @State private var groups: [SharedLogic.Group] = []
     @State private var selectedGroupID: String?
 
@@ -36,8 +37,10 @@ struct MapView: View {
     @State private var selectedRadius = 200
 
     @State private var cameraPosition: MapCameraPosition = .automatic
-    
     @State private var mapSize: CGSize = .zero
+
+    @State private var memberLocations: [String: CLLocationCoordinate2D] = [:]
+    @State private var isListeningForEvents = false
 
     private var selectedGroup: SharedLogic.Group? {
         groups.first { $0.id == selectedGroupID }
@@ -106,6 +109,8 @@ struct MapView: View {
                 )
             }
             .onChange(of: selectedGroupID) { _, groupID in
+                memberLocations.removeAll()
+
                 guard let groupID else {
                     safeRegions = []
                     hasFetchedRegions = false
@@ -178,6 +183,70 @@ struct MapView: View {
                 Text(errorMessage ?? "")
             }
         }
+        .onChange(of: locationManager.currentLocation, initial: true) { oldLocation, location in
+            print("📍 [Location] onChange TRIGGERED")
+            print("📍 [Location] Old: \(String(describing: oldLocation))")
+            print("📍 [Location] New: \(String(describing: location))")
+
+            guard let location else {
+                print("❌ [Location] Current location is NIL")
+                return
+            }
+
+            print("✅ [Location] Coordinates: \(location.coordinate.latitude), \(location.coordinate.longitude)")
+
+            guard let groupID = selectedGroupID else {
+                print("❌ [Location] selectedGroupID is NIL")
+                return
+            }
+
+            print("✅ [Location] Selected Group ID: \(groupID)")
+            print("🔌 [Socket] Connected: \(socketManager.isConnected)")
+
+            let event: [String: Any] = [
+                "type": "location.updated",
+                "data": [
+                    "group_id": groupID,
+                    "latitude": location.coordinate.latitude,
+                    "longitude": location.coordinate.longitude
+                ]
+            ]
+
+            print("📦 [Location] Preparing event: \(event)")
+
+            guard JSONSerialization.isValidJSONObject(event) else {
+                print("❌ [Location] Invalid JSON object")
+                return
+            }
+
+            guard let data = try? JSONSerialization.data(withJSONObject: event),
+                  let json = String(data: data, encoding: .utf8) else {
+                print("❌ [Location] JSON serialization failed")
+                return
+            }
+
+            print("✅ [Location] JSON created: \(json)")
+            print("📤 [Socket] Sending location event...")
+
+            Task {
+                do {
+                    let sent = try await socketManager.sendEvent(event: json)
+
+                    print("📤 [Socket] Send result: \(sent)")
+
+                    if (sent as? Bool) ?? false{
+                        print("✅ [Socket] Location event sent successfully")
+                    } else {
+                        print("❌ [Socket] Send returned FALSE — socket disconnected or session missing")
+                    }
+                } catch {
+                    print("❌ [Socket] Send error: \(error.localizedDescription)")
+                }
+            }
+        }
+        .task {
+             connectSocketAndReceiveEvents()
+        }
     }
 
     // MARK: - Map
@@ -190,6 +259,35 @@ struct MapView: View {
             MapReader { proxy in
                 Map(position: $cameraPosition) {
                     UserAnnotation()
+
+                    // MARK: Group Members
+
+                    if let selectedGroup {
+                        ForEach(selectedGroup.members, id: \.id) { member in
+                            if let coordinate = memberLocations[member.id] {
+                                Annotation(
+                                    member.fullName,
+                                    coordinate: coordinate,
+                                    anchor: .bottom
+                                ) {
+                                    VStack(spacing: 4) {
+                                        Image(systemName: "person.crop.circle.fill")
+                                            .font(.system(size: 36))
+                                            .foregroundStyle(.blue)
+                                            .background(.white, in: Circle())
+
+                                        Text(member.fullName)
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 4)
+                                            .background(.regularMaterial, in: Capsule())
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // MARK: Safe Regions
 
                     ForEach(safeRegions, id: \.id) { region in
                         let coordinate = CLLocationCoordinate2D(
@@ -214,6 +312,8 @@ struct MapView: View {
                         .foregroundStyle(.blue.opacity(0.15))
                         .stroke(.blue, lineWidth: 2)
                     }
+
+                    // MARK: New Safe Region
 
                     if !hasSafeRegion,
                        let coordinate = selectedCoordinate {
@@ -266,7 +366,7 @@ struct MapView: View {
                             systemImage: "mappin.and.ellipse"
                         )
                         .font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 14)
+                        .padding(.horizontal, 30)
                         .padding(.vertical, 10)
                         .background(.regularMaterial, in: Capsule())
                         .padding(.top, 12)
@@ -305,7 +405,11 @@ struct MapView: View {
                         ForEach(selectedGroup.members, id: \.id) { member in
                             VStack(spacing: 6) {
                                 Circle()
-                                    .fill(.quaternary)
+                                    .fill(
+                                        memberLocations[member.id] == nil
+                                            ? .gray
+                                            : .green.opacity(0.2)
+                                    )
                                     .frame(width: 48, height: 48)
                                     .overlay {
                                         Text(
@@ -313,6 +417,17 @@ struct MapView: View {
                                                 .uppercased()
                                         )
                                         .font(.headline)
+                                    }
+                                    .overlay(alignment: .bottomTrailing) {
+                                        if memberLocations.contains(where: { $0.key == member.id}){
+                                            Circle()
+                                                .fill(.green)
+                                                .frame(width: 12, height: 12)
+                                                .overlay {
+                                                    Circle()
+                                                        .stroke(.background, lineWidth: 2)
+                                                }
+                                        }
                                     }
 
                                 Text(member.fullName)
@@ -340,6 +455,107 @@ struct MapView: View {
         }
     }
 
+    // MARK: - WebSocket
+
+    @MainActor
+    private func connectSocketAndReceiveEvents() {
+        socketManager.watchEvents { event in
+            Task { @MainActor in
+                handleSocketEvent(event)
+            }
+        }
+    }
+
+    @MainActor
+    private func handleSocketEvent(_ event: String) {
+        print("📩 Received event: \(event)")
+
+        guard
+            let data = event.data(using: .utf8),
+            let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let eventType = payload["type"] as? String,
+            let dataPayload = payload["data"] as? [String: Any]
+        else {
+            print("❌ Invalid event")
+            return
+        }
+
+        // MARK: - User Went Outside Safe Region
+        print("Event is ", eventType)
+        if eventType == "user_went_outside" {
+            guard
+                let user = dataPayload["user"] as? [String: Any],
+                let userID = user["id"] as? String,
+                let member = selectedGroup?.members.first(where: { $0.id == userID })
+            else {
+                print("❌ User not found in selected group")
+                return
+            }
+
+            print("🚨 \(member.fullName) went outside the safe region")
+
+            let content = UNMutableNotificationContent()
+            content.title = "Safe Region Alert 🚨"
+            content.body = "\(member.fullName) has left the safe region."
+            content.sound = .default
+
+            let request = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil
+            )
+
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error {
+                    print("❌ Notification failed: \(error.localizedDescription)")
+                } else {
+                    print("✅ Safe region notification triggered")
+                }
+            }
+
+            return
+        }
+
+        // MARK: - Location Updated
+
+        guard eventType == "location.updated" else {
+            return
+        }
+
+        guard
+            let userID = dataPayload["user_id"] as? String,
+            let latitude = numberValue(dataPayload["latitude"]),
+            let longitude = numberValue(dataPayload["longitude"])
+        else {
+            print("❌ Invalid location update")
+            return
+        }
+
+        guard selectedGroup?.members.contains(where: { $0.id == userID }) == true else {
+            print("⚠️ User \(userID) is not in selected group")
+            return
+        }
+
+        memberLocations[userID] = CLLocationCoordinate2D(
+            latitude: latitude,
+            longitude: longitude
+        )
+
+        print("✅ Updated \(userID): \(latitude), \(longitude)")
+    }
+
+    private func numberValue(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber {
+            return number.doubleValue
+        }
+
+        if let string = value as? String {
+            return Double(string)
+        }
+
+        return nil
+    }
+
     // MARK: - Fetch Safe Regions
 
     @MainActor
@@ -349,7 +565,6 @@ struct MapView: View {
             errorMessage = "Please log in to view safe regions."
             return
         }
-
 
         isLoadingRegions = true
         hasFetchedRegions = false
@@ -365,13 +580,6 @@ struct MapView: View {
                 groupID: groupID,
                 accessToken: accessToken
             )
-
-//            if safeRegionViewModel.uiState.value.isSessionExpired {
-//                GTKeychainStore.shared.clearTokens()
-//                GTKeychainStore.shared.clearClientID()
-//                appRouter.logout()
-//                return
-//            }
 
             guard selectedGroupID == groupID else {
                 return
@@ -398,7 +606,6 @@ struct MapView: View {
                     )
                 )
             }
-
         } catch {
             guard selectedGroupID == groupID else {
                 return
@@ -443,7 +650,6 @@ struct MapView: View {
                     return
                 }
 
-                // Update the map immediately with the created region.
                 safeRegions = [result.data]
                 hasFetchedRegions = true
                 selectedCoordinate = nil
@@ -484,7 +690,6 @@ struct MapView: View {
 
             if result.sessionExpired {
                 GTKeychainStore.shared.clearTokens()
-                GTKeychainStore.shared.clearClientID()
                 appRouter.logout()
                 return
             }
@@ -501,23 +706,22 @@ struct MapView: View {
             if !groups.contains(where: { $0.id == selectedGroupID }) {
                 selectedGroupID = groups.first?.id
             }
-
         } catch {
             errorMessage = error.localizedDescription
         }
     }
-    
+
+    // MARK: - Camera
+
     private func fittedCameraRegion(
         center: CLLocationCoordinate2D,
         radiusMeters: CLLocationDistance
     ) -> MKCoordinateRegion {
         let width = max(mapSize.width, 1)
+        let height = max(mapSize.height, 1)
 
-        // Circle should occupy approximately 65% of the map width.
-        let visibleDiameter = radiusMeters * 2 / 0.75
-
-        // Extra vertical space keeps the circle comfortably visible.
-        let visibleHeight = visibleDiameter * (width / max(mapSize.height, 1))
+        let visibleDiameter = radiusMeters * 2 / 0.65
+        let visibleHeight = visibleDiameter * (width / height)
 
         return MKCoordinateRegion(
             center: center,
