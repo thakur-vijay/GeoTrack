@@ -4,6 +4,7 @@ data class User(
     val id: String,
     val fullName: String,
     val email: String,
+    val isOnline: Boolean = false,
     val createdAt: String,
     val updatedAt: String
 )

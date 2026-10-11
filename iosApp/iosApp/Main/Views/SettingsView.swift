@@ -12,6 +12,7 @@ struct SettingsView: View {
     let viewModel: UsersViewModel
     let authViewModel: AuthViewModel
     let socketManager: SocketManager
+    let groupID: String?
     @State private var fullName = ""
     @State private var email = ""
     @State private var errorMessage: String?
@@ -39,7 +40,10 @@ struct SettingsView: View {
                             if !accessToken.isEmpty {
                                 do {
                                     try await socketManager.disconnect()
-                                    try await authViewModel.logout(accessToken: accessToken)
+                                    try await authViewModel.logout(
+                                        accessToken: accessToken,
+                                        groupId: groupID ?? ""
+                                    )
                                 } catch {
                                     print("Backend logout failed: \(error.localizedDescription)")
                                 }

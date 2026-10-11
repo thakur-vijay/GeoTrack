@@ -12,7 +12,7 @@ import Observation
 
 @MainActor
 @Observable
-final class LocationManager: NSObject, CLLocationManagerDelegate {
+final class LocationManager: NSObject, @MainActor CLLocationManagerDelegate {
 
     private let manager = CLLocationManager()
 
@@ -20,6 +20,9 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
     private(set) var authorizationStatus: CLAuthorizationStatus
     private(set) var isLoadingLocation = false
     private(set) var errorMessage: String?
+    
+    private let minimumDistanceForUpdate: CLLocationDistance = 20
+    private var lastPublishedLocation: CLLocation?
 
     private var isUpdatingLocation = false
 
@@ -29,7 +32,7 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
 
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.distanceFilter = 5
+        manager.distanceFilter = 20
         manager.activityType = .otherNavigation
         manager.pausesLocationUpdatesAutomatically = false
 
@@ -144,14 +147,52 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
             return
         }
 
-        guard location.horizontalAccuracy >= 0 else { return }
+        guard location.horizontalAccuracy >= 0 else {
+            return
+        }
+        
+        guard location.horizontalAccuracy <= 50 else {
+            print("⏭️ Location ignored: accuracy too low")
+            return
+        }
 
-        currentLocation = location
         isLoadingLocation = false
         errorMessage = nil
 
+        // First valid location is always accepted.
+        guard let lastPublishedLocation else {
+            self.lastPublishedLocation = location
+            currentLocation = location
+
+            print(
+                "📍 Initial location: " +
+                "\(location.coordinate.latitude), " +
+                "\(location.coordinate.longitude)"
+            )
+
+            return
+        }
+
+        // Calculate distance from the last accepted location.
+        let distance = location.distance(from: lastPublishedLocation)
+
+        guard distance >= minimumDistanceForUpdate else {
+            print(
+                "⏭️ Location ignored: moved only " +
+                "\(Int(distance))m; minimum is " +
+                "\(Int(minimumDistanceForUpdate))m"
+            )
+
+            return
+        }
+
+        // Accept location only after the minimum movement threshold.
+        self.lastPublishedLocation = location
+        currentLocation = location
+
         print(
-            "📍 Location updated: \(location.coordinate.latitude), " +
+            "📍 Location accepted after moving \(Int(distance))m: " +
+            "\(location.coordinate.latitude), " +
             "\(location.coordinate.longitude)"
         )
     }

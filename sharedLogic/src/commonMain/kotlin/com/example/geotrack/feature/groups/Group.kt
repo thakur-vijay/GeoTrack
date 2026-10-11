@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -27,6 +28,7 @@ data class Group(
     val id: String,
     val name: String,
     val members: List<User>,
+    val createdBy: String,
     val createdAt: String,
     val updatedAt: String
 )
@@ -220,6 +222,7 @@ class GroupViewModel(
                     id = member.getValue("id").jsonPrimitive.content,
                     fullName = member.getValue("full_name").jsonPrimitive.content,
                     email = member.getValue("email").jsonPrimitive.content,
+                    isOnline = member["is_online"]?.jsonPrimitive?.booleanOrNull ?: false,
                     createdAt = member.getValue("created_at").jsonPrimitive.content,
                     updatedAt = member.getValue("updated_at").jsonPrimitive.content
                 )
@@ -229,6 +232,7 @@ class GroupViewModel(
             id = json.getValue("id").jsonPrimitive.content,
             name = json.getValue("name").jsonPrimitive.content,
             members = members,
+            createdBy = json.getValue("created_by").jsonPrimitive.content,
             createdAt = json.getValue("created_at").jsonPrimitive.content,
             updatedAt = json.getValue("updated_at").jsonPrimitive.content
         )

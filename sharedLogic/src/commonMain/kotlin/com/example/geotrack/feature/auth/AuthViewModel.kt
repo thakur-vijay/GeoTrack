@@ -62,9 +62,9 @@ class AuthViewModel(
         )
     }
 
-    suspend fun logout(accessToken: String): Boolean {
+    suspend fun logout(accessToken: String, groupId: String): Boolean {
         return try {
-            val response = networkClient.request("/auth/logout") {
+            val response = networkClient.request("/auth/logout?group_id=$groupId") {
                 method = HttpMethod.Post
                 header(HttpHeaders.Authorization, "Bearer $accessToken")
             }
@@ -87,7 +87,6 @@ class AuthViewModel(
             false
         }
     }
-
     private suspend fun executeAuthRequest(
         endpoint: String,
         email: String,

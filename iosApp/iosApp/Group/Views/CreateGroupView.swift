@@ -36,6 +36,13 @@ struct CreateGroupView: View {
         }
         .navigationTitle("Create Your Group")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Skip") {
+                    appRouter.login()
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 12) {
                 GTButton("Create Group") {
